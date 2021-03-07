@@ -40,14 +40,14 @@ class linkedList {
 private:
 	shared_ptr<Node<T>> front = std::make_shared<Node<T>>();
 	shared_ptr<Node<T>> back = std::make_shared<Node<T>>();
-	atomic<shared_ptr<AtomicNode<T>>> aFront;
-	atomic<shared_ptr<AtomicNode<T>>> aBack;
+	//atomic<shared_ptr<AtomicNode<T>>> aFront;
+	//atomic<shared_ptr<AtomicNode<T>>> aBack;
 	shared_mutex myMutex;
 	int numNodes = 0;
 	bool useLocks;
 
 
-
+#pragma region insert
 	void appendLockFree(T newNode) {
 
 	}
@@ -62,6 +62,7 @@ private:
 				NewNode->prev = temp;
 				temp->next = NewNode;
 				back->prev = NewNode;
+				break;
 			}
 			else if (newNode < temp->next->value) {
 				unique_lock lock(myMutex);
@@ -73,8 +74,9 @@ private:
 			}
 		}
 	}
+#pragma endregion
 
-
+#pragma region remove
 	void removeLockFree(T removalNode) {
 
 	}
@@ -89,7 +91,7 @@ private:
 			}
 		}
 	}
-
+#pragma endregion
 	bool findLocked(T val) {
 		for (shared_ptr<Node<T>> temp = front; temp != back; temp = temp->next) {
 			if (temp->value == val) {
@@ -134,9 +136,9 @@ public:
 		if (useLocks) {
 			removeLocked(removalNode);
 		}
-		else {
-			//removeLockedFree(removalNode);
-		}
+		// else {
+		// 	//removeLockedFree(removalNode);
+		// }
 	}
 
 };
