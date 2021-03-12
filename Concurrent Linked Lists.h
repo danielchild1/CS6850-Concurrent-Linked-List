@@ -29,7 +29,7 @@ template <typename T>
 class singleNode
 {
 public:
-	T value;
+	T key;
 	singleNode<T> *next;
 };
 
@@ -47,15 +47,79 @@ private:
 	int numNodes = 0;
 	bool useLocks;
 
+	bool is_marked_reference(singleNode<T> ptr)
+	{
+		uint64_t val = reinterpret_cast<std::uintptr_t>(ptr);
+		return (val % 2 == 1);
+	}
+
+	singleNode<T> *get_unmarked_reference(singleNode<T> *ptr)
+	{
+		uint64_t val = reinterpret_cast<std::uintptr_t>(ptr);
+		if (val % 2 == 1)
+		{
+			val -= 1;
+		}
+		return reinterpret_cast<singleNode<T> *>(val);
+	}
+
+	singleNode<T> *get_marked_reference(singleNode<T> *ptr)
+	{
+		uint64_t val = reinterpret_cast<std::uintptr_t>(ptr);
+		if (val % 2 ==)
+		{
+			val += 1;
+		}
+		return reinterpret_cast<singleNode<T> *>(val);
+	}
+
+	singleNode<T> search(KeyType search_key, singleNode **left_node)
+	{
+		singleNode<T> *left_node_next, *right_node;
+	search_again:
+		do
+		{
+			singleNode<T> *t = singleFront;
+			singleNode<T> *t_next = head.next; /* 1: Find left_node and right_node */
+			do
+			{
+				if (!is_marked_reference(t_next))
+				{
+					(*left_node) = t;
+					left_node_next = t_next;
+				}
+				t = get_unmarked_reference(t_next);
+				if (t == singleBack)
+					break;
+				t_next = t.next;
+			} while (is_marked_reference(t_next) || (t.key < search_key)); /*B1*/
+			right_node = t;												   /* 2: Check nodes are adjacent */
+			if (left_node_next == right_node)
+				if ((right_node != singleBack) && is_marked_reference(right_node.next))
+					goto search_again; /*G1*/
+				else
+				{
+					return right_node;
+				} /*R1*/																	   /* 3: Remove one or more marked nodes */
+			if (atomic_compare_exchange_strong(&(left_node.next), left_node_next, right_node)) /*C1*/
+				if ((right_node != singleBack) && is_marked_reference(right_node.next))
+					goto search_again; /*G2*/
+				else
+				{
+					return right_node;
+				}		/*R2*/
+		} while (true); /*B2*/
+	}
+
 #pragma region insert
 	void appendLockFree(T key)
 	{
-		singleNode *new_node = new Node(key);
-		singleNode *right_node, *left_node;
+		singleNode<T> *new_node = new Node(key);
+		singleNode<T> *right_node, *left_node;
 		do
 		{
 			right_node = search(key, &left_node);
-			if ((right_node != tail) && (right_node.key == key)) /*T1*/
+			if ((right_node != singleBack) && (right_node.key == key)) /*T1*/
 				return false;
 			new_node.next = right_node;
 			if (atomic_compare_exchange_strong(&left_node.next, right_node, new_node)) /*C2*/
@@ -95,11 +159,11 @@ private:
 
 	void removeLockFree(T search_key)
 	{
-		singleNode *right_node, *right_node_next, *left_node;
+		singleNode<T> *right_node, *right_node_next, *left_node;
 		do
 		{
 			right_node = search(search_key, &left_node);
-			if ((right_node == tail) || (right_node.key != search_key)) /*T1*/
+			if ((right_node == singleBack) || (right_node.key != search_key)) /*T1*/
 				return false;
 			right_node_next = right_node.next;
 			if (!is_marked_reference(right_node_next))
@@ -129,11 +193,14 @@ private:
 #pragma region search
 	bool findLockFree(T search_key)
 	{
-		singleNode *right_node, *left_node;
+		singleNode<T> *right_node, *left_node;
 		right_node = search(search_key, &left_node);
 		if ((right_node == tail) || (right_node.key != search_key))
 			return false;
-		elsereturn true;
+		else
+		{
+			return true;
+		}
 	}
 	bool findLocked(T val)
 	{
@@ -153,12 +220,12 @@ private:
 
 	singleNode<T> *search(T search_key, singleNode<T> **left_node)
 	{
-		Node *left_node_next, *right_node;
+		singleNode<T> *left_node_next, *right_node;
 	search_again:
 		do
 		{
-			Node *t = head;
-			Node *t_next = head.next; /* 1: Find left_node and right_node */
+			singleNode<T> *t = singleFront;
+			singleNode<T> *t_next = singleFront.next; /* 1: Find left_node and right_node */
 			do
 			{
 				if (!is_marked_reference(t_next))
@@ -167,30 +234,36 @@ private:
 					left_node_next = t_next;
 				}
 				t = get_unmarked_reference(t_next);
-				if (t == tail)
+				if (t == singleBack)
 					break;
 				t_next = t.next;
 			} while (is_marked_reference(t_next) || (t.key < search_key)); /*B1*/
 			right_node = t;												   /* 2: Check nodes are adjacent */
 			if (left_node_next == right_node)
-				if ((right_node != tail) && is_marked_reference(right_node.next))
+			{
+				if ((right_node != singleBack) && is_marked_reference(right_node.next))
+				{
 					goto search_again; /*G1*/
+				}
 				else
 				{
-					return right_node;															/*R1*/
-				}																				/* 3: Remove one or more marked nodes */
-			if (atomic_compare_exchange_strong((&(left_node.next), left_node_next, right_node)) /*C1*/
-				if ((right_node != tail) && is_marked_reference(right_node.next))
+					return right_node; /*R1*/
+				}
+			}																					 /* 3: Remove one or more marked nodes */
+			if (atomic_compare_exchange_strong(&(left_node.next), left_node_next, right_node)){ /*C1*/
+				if ((right_node != singleBack) && is_marked_reference(right_node.next))
+				{
 					goto search_again; /*G2*/
+				}
+			}
 			else {
 				return right_node;}	   /*R2*/
-		} while (true);					   /*B2*/
+		} while (true);				   /*B2*/
 	}
 
 #pragma endregion
 
 public:
-
 	linkedList(bool locks) : useLocks(locks)
 	{
 		if (locks)
