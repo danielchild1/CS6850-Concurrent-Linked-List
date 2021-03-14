@@ -2,10 +2,10 @@
 //
 
 #include "Concurrent Linked Lists.h"
-#include <iostream>
 #include <memory>
 #include <cstdio>
 #include <thread>
+#include <iostream>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <time.h>
@@ -18,71 +18,150 @@ using std::thread;
 mutex myMutexx;
 
 unsigned int workerNumber = 0;
+atomic<int> aworkerNumber {0};
+unsigned int numThreads;
+const unsigned int numTimesToRun = 100000; 
+linkedList<int> locked(true);
+linkedList<int> unlocked(false);
 
-void test() {
+
+
+void lockedListTest() {
 	unsigned int localWorkerNumber;
-	linkedList<int> testLinkedList(true);
 
-	while (workerNumber <= 100) {
+	while (workerNumber <= numTimesToRun) {
 
 		myMutexx.lock();
-		workerNumber++;
-		localWorkerNumber = workerNumber;
+		localWorkerNumber = workerNumber++;
 		myMutexx.unlock();
 
-		int action = rand() % 100;
-		int num = rand() % 99;
+		if(localWorkerNumber > numTimesToRun){
+			return;
+		}
+
+		int action = rand() % 99 + 1;
+		int num = rand() % 100;
 
 		if (action <= 10) {
-			testLinkedList.insert(num);
-			printf("insert: %d\n", num);
+			locked.insert(num);
+			if((localWorkerNumber % 10000) == 0){
+				printf("insert: %d\n", num);
+			}
+			
 		}
 		else if (action <= 20) {
-			testLinkedList.remove(num);
-			printf("remove: %d\n", num);
+			locked.remove(num);
+			if((localWorkerNumber % 10000) == 0){
+				printf("remove: %d\n", num);
+			}
 		}
 		else {
-			testLinkedList.find(num);
-			//printf("found: %d\n", testLinkedList.find(num));
+			locked.find(num);
+			if((localWorkerNumber % 10000) == 0){
+				printf("find: %d\n", num);
+			}
 		}
-
-		
-
-
 
 	}
 
+}
+
+void unlockedListTest() {
+	int localWorkerNumber;
+
+	while (aworkerNumber <= numTimesToRun) {
+
+		
+		localWorkerNumber = aworkerNumber;
+		atomic_compare_exchange_strong( &aworkerNumber, &localWorkerNumber  , aworkerNumber+1 );
+
+		if(localWorkerNumber > numTimesToRun){
+			break;
+		}
+
+		int action = rand() % 99 + 1;
+		int num = rand() % 100;
+
+		if (action <= 10) {
+			unlocked.insert(num);
+			if((localWorkerNumber % 10000) == 0){
+				printf("insert: %d\n", num);
+			}
+		}
+		else if (action <= 20) {
+			unlocked.remove(num);
+			if(localWorkerNumber % 10000 == 0){
+				printf("remove: %d\n", num);
+			}
+		}
+		else {
+			unlocked.find(num);
+			if(localWorkerNumber % 10000 == 0){
+				printf("find: %d\n", num);
+			}
+		}
+
+	}
+
+}
+
+
+void lockedThreads(){
+	thread* threads = new thread[numThreads];
+
+	for (int i = 0; i < numThreads; i++) {
+		threads[i] = thread(lockedListTest);
+	}
+	for (int i = 0; i < numThreads; i++) {
+		threads[i].join();
+	}
 	
+	delete[] threads;
+}
 
+void unlockedThreads(){
+	thread* threads = new thread[numThreads];
 
+	for (int i = 0; i < numThreads; i++) {
+		threads[i] = thread(unlockedListTest);
+	}
+	for (int i = 0; i < numThreads; i++) {
+		threads[i].join();
+	}
 
-
+	delete[] threads;
 }
 
 
 
 int main()
 {
+
 	srand(time(NULL));
 
-	// thread* threads = new thread[4];
+	printf("How many threads: ");
+	std::cin >> numThreads;
 
-	// for (int i = 0; i < 4; i++) {
-	// 	threads[i] = thread(test);
-	// }
-	// for (int i = 0; i < 4; i++) {
-	// 	threads[i].join();
-	// }
-	printf("lets go!");
-	linkedList<int> test(true);
+	char locked;
+	printf("Locked (l) or Unlocked (u): ");
+	std::cin >> locked;
 
-	test.insert(15);
-	test.insert(89);
-	test.insert(1);
-	printf("find 19: %d\n", test.find(19));
-	printf("find 89: %d\n", test.find(89));
-	test.remove(89);
-	printf("find 89: %d\n", test.find(89));
+
+	auto start = std::chrono::high_resolution_clock::now();
+
+	if(locked == 'l'){
+		start = std::chrono::high_resolution_clock::now();
+		lockedThreads();
+	}
+	else{
+		start = std::chrono::high_resolution_clock::now();
+		unlockedThreads();
+	}
+	
+	auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> running_time = end - start;
+
+	printf("Time: %f \n", running_time.count());
 
 	return 0;
 }

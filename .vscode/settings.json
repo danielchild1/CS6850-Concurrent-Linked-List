@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "atomic": "cpp"
+        "atomic": "cpp",
+        "chrono": "cpp",
+        "thread": "cpp",
+        "new": "cpp"
     }
 }

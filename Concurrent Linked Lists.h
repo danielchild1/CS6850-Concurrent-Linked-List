@@ -1,6 +1,5 @@
 ﻿// Concurrent Linked Lists.h : Include file for standard system include files,
 // or project specific include files.
-
 #include <memory>
 #include <cstdio>
 #include <atomic>
@@ -30,7 +29,16 @@ class singleNode
 {
 public:
 	T key;
-	singleNode<T> *next;
+	atomic<singleNode<T>*> next;
+
+	singleNode(T k):key(k){};
+	singleNode(){};
+
+	singleNode<T> operator=(singleNode<T> other){
+		std::swap(key, other.key);
+		std::swap(next, other.next);
+		return *this;
+	}
 };
 
 template <typename T>
@@ -39,15 +47,13 @@ class linkedList
 private:
 	shared_ptr<Node<T>> front = std::make_shared<Node<T>>();
 	shared_ptr<Node<T>> back = std::make_shared<Node<T>>();
-	// atomic<shared_ptr<AtomicNode<T>>> aBack;
-	// atomic<shared_ptr<AtomicNode<T>>> aFront;
 	singleNode<T> *singleFront = new singleNode<T>();
 	singleNode<T> *singleBack = new singleNode<T>();
 	shared_mutex myMutex;
 	int numNodes = 0;
 	bool useLocks;
 
-	bool is_marked_reference(singleNode<T> ptr)
+	bool is_marked_reference(singleNode<T>* ptr)
 	{
 		uint64_t val = reinterpret_cast<std::uintptr_t>(ptr);
 		return (val % 2 == 1);
@@ -66,44 +72,47 @@ private:
 	singleNode<T> *get_marked_reference(singleNode<T> *ptr)
 	{
 		uint64_t val = reinterpret_cast<std::uintptr_t>(ptr);
-		if (val % 2 ==)
+		if (val % 2 == 1)
 		{
 			val += 1;
 		}
 		return reinterpret_cast<singleNode<T> *>(val);
 	}
 
-	singleNode<T> search(KeyType search_key, singleNode **left_node)
+	singleNode<T>* search(T SearchKey, singleNode<T> **leftNode)
 	{
-		singleNode<T> *left_node_next, *right_node;
+		singleNode<T> *left_node_next;
+		singleNode<T> *right_node;
 	search_again:
 		do
 		{
 			singleNode<T> *t = singleFront;
-			singleNode<T> *t_next = head.next; /* 1: Find left_node and right_node */
+			singleNode<T> *t_next = singleFront->next; /* 1: Find left_node and right_node */
 			do
 			{
 				if (!is_marked_reference(t_next))
 				{
-					(*left_node) = t;
+					(*leftNode) = t;
 					left_node_next = t_next;
 				}
 				t = get_unmarked_reference(t_next);
 				if (t == singleBack)
 					break;
-				t_next = t.next;
-			} while (is_marked_reference(t_next) || (t.key < search_key)); /*B1*/
+				t_next = t->next;
+			} while (is_marked_reference(t_next) || (t->key < SearchKey)); /*B1*/
 			right_node = t;												   /* 2: Check nodes are adjacent */
 			if (left_node_next == right_node)
-				if ((right_node != singleBack) && is_marked_reference(right_node.next))
-					goto search_again; /*G1*/
+				if ((right_node != singleBack) && is_marked_reference(right_node->next))
+					//goto search_again; /*G1*/
+					continue;
 				else
 				{
 					return right_node;
 				} /*R1*/																	   /* 3: Remove one or more marked nodes */
-			if (atomic_compare_exchange_strong(&(left_node.next), left_node_next, right_node)) /*C1*/
-				if ((right_node != singleBack) && is_marked_reference(right_node.next))
-					goto search_again; /*G2*/
+			if (atomic_compare_exchange_strong(&((*leftNode)->next), &left_node_next, right_node)) /*C1*/
+				if ((right_node != singleBack) && is_marked_reference(right_node->next))
+					//goto search_again; /*G2*/
+					continue;
 				else
 				{
 					return right_node;
@@ -112,75 +121,72 @@ private:
 	}
 
 #pragma region insert
-	void appendLockFree(T key)
+	bool appendLockFree(T key)
 	{
-		singleNode<T> *new_node = new Node(key);
-		singleNode<T> *right_node, *left_node;
+		singleNode<T> *new_node = new singleNode(key);
+		singleNode<T> *right_node;
+		singleNode<T> *left_node;
+
 		do
 		{
 			right_node = search(key, &left_node);
-			if ((right_node != singleBack) && (right_node.key == key)) /*T1*/
-				return false;
-			new_node.next = right_node;
-			if (atomic_compare_exchange_strong(&left_node.next, right_node, new_node)) /*C2*/
+			// if ((right_node != singleBack) && (right_node->key == key)) /*T1*/
+			// 	return false;
+			new_node->next = right_node;
+			if (atomic_compare_exchange_strong(&(left_node->next), &right_node, new_node)) /*C2*/
 				return true;
 		} while (true); /*B3*/
 	}
-	void appendLocked(T newNode)
+	bool appendLocked(T newNode)
 	{
 		shared_ptr<Node<T>> NewNode = std::make_shared<Node<T>>();
 		NewNode->value = newNode;
 
+		unique_lock<shared_mutex> lock(myMutex);
 		for (shared_ptr<Node<T>> temp = front; temp != back; temp = temp->next)
 		{
-			if (temp->next == back)
+			if (temp->next == back ||newNode < temp->next->value)
 			{
-				unique_lock lock(myMutex);
-				NewNode->next = back;
-				NewNode->prev = temp;
-				temp->next = NewNode;
-				back->prev = NewNode;
-				break;
-			}
-			else if (newNode < temp->next->value)
-			{
-				unique_lock lock(myMutex);
+				
 				NewNode->next = temp->next;
 				NewNode->prev = temp;
 				temp->next->prev = NewNode;
 				temp->next = NewNode;
-				break;
+				return true;
 			}
 		}
+		return false;
 	}
 #pragma endregion
 
 #pragma region remove
 
-	void removeLockFree(T search_key)
+	bool removeLockFree(T search_key)
 	{
 		singleNode<T> *right_node, *right_node_next, *left_node;
 		do
 		{
 			right_node = search(search_key, &left_node);
-			if ((right_node == singleBack) || (right_node.key != search_key)) /*T1*/
+			if ((right_node == singleBack) || (right_node->key != search_key)) /*T1*/
 				return false;
-			right_node_next = right_node.next;
+			right_node_next = right_node->next;
 			if (!is_marked_reference(right_node_next))
-				if (atomic_compare_exchange_strong(&(right_node.next), /*C3*/ right_node_next, get_marked_reference(right_node_next)))
+				if (atomic_compare_exchange_strong(&(right_node->next), &right_node_next, get_marked_reference(right_node_next)))
 					break;
 		} while (true);																		 /*B4*/
-		if (!atomic_compare_exchange_strong(&(left_node.next), right_node, right_node_next)) /*C4*/
-			right_node = search(right_node.key, &left_node);
+		if (!atomic_compare_exchange_strong(&(left_node->next), &right_node, right_node_next)) /*C4*/
+			right_node = search(right_node->key, &left_node);
 		return true;
 	}
+
 	void removeLocked(T removealNode)
 	{
+		unique_lock<shared_mutex> lock(myMutex);
 		for (shared_ptr<Node<T>> temp = front; temp != back; temp = temp->next)
 		{
 			if (temp->value == removealNode)
 			{
-				unique_lock lock(myMutex);
+				
 				temp->prev->next = temp->next;
 				temp->next->prev = temp->prev;
 				numNodes--;
@@ -195,7 +201,7 @@ private:
 	{
 		singleNode<T> *right_node, *left_node;
 		right_node = search(search_key, &left_node);
-		if ((right_node == tail) || (right_node.key != search_key))
+		if ((right_node == singleBack) || (right_node->key != search_key))
 			return false;
 		else
 		{
@@ -204,6 +210,7 @@ private:
 	}
 	bool findLocked(T val)
 	{
+		shared_lock<shared_mutex> lock(myMutex);
 		for (shared_ptr<Node<T>> temp = front; temp != back; temp = temp->next)
 		{
 			if (temp->value == val)
@@ -218,49 +225,6 @@ private:
 		return false;
 	}
 
-	singleNode<T> *search(T search_key, singleNode<T> **left_node)
-	{
-		singleNode<T> *left_node_next, *right_node;
-	search_again:
-		do
-		{
-			singleNode<T> *t = singleFront;
-			singleNode<T> *t_next = singleFront.next; /* 1: Find left_node and right_node */
-			do
-			{
-				if (!is_marked_reference(t_next))
-				{
-					(*left_node) = t;
-					left_node_next = t_next;
-				}
-				t = get_unmarked_reference(t_next);
-				if (t == singleBack)
-					break;
-				t_next = t.next;
-			} while (is_marked_reference(t_next) || (t.key < search_key)); /*B1*/
-			right_node = t;												   /* 2: Check nodes are adjacent */
-			if (left_node_next == right_node)
-			{
-				if ((right_node != singleBack) && is_marked_reference(right_node.next))
-				{
-					goto search_again; /*G1*/
-				}
-				else
-				{
-					return right_node; /*R1*/
-				}
-			}																					 /* 3: Remove one or more marked nodes */
-			if (atomic_compare_exchange_strong(&(left_node.next), left_node_next, right_node)){ /*C1*/
-				if ((right_node != singleBack) && is_marked_reference(right_node.next))
-				{
-					goto search_again; /*G2*/
-				}
-			}
-			else {
-				return right_node;}	   /*R2*/
-		} while (true);				   /*B2*/
-	}
-
 #pragma endregion
 
 public:
@@ -273,7 +237,7 @@ public:
 		}
 		else
 		{
-			singleFront->next = back;
+			singleFront->next = singleBack;
 		}
 	}
 	void insert(T newNode)
@@ -296,6 +260,9 @@ public:
 		{
 			return findLocked(value);
 		}
+		else{
+			return findLockFree(value);
+		}
 		return false;
 	}
 
@@ -305,9 +272,9 @@ public:
 		{
 			removeLocked(removalNode);
 		}
-		// else {
-		// 	//removeLockedFree(removalNode);
-		// }
+		else {
+			removeLockFree(removalNode);
+		}
 	}
 };
 
