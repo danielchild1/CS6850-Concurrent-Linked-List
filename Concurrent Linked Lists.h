@@ -255,7 +255,6 @@ public:
 
 	bool find(T value)
 	{
-		shared_lock lock(myMutex);
 		if (useLocks)
 		{
 			return findLocked(value);

@@ -40,7 +40,7 @@ void lockedListTest() {
 		}
 
 		int action = rand() % 99 + 1;
-		int num = rand() % 100;
+		int num = rand() % 100 +1;
 
 		if (action <= 10) {
 			locked.insert(num);
